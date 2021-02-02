@@ -11,7 +11,8 @@ from ..NSfracStep import __all__
 def setup(u_components, u, v, p, q, bcs, les_model, nn_model, nu, nut_,nunn_,
           scalar_components, V, Q, x_, p_, u_, A_cache,
           velocity_update_solver, assemble_matrix, homogenize,
-          GradFunction, DivFunction, LESsource, NNsource, **NS_namespace):
+          GradFunction, DivFunction, LESsource, NNsource, backflow_facets,
+          neumann_facets, boundary,  **NS_namespace):
     """Preassemble mass and diffusion matrices.
 
     Set up and prepare all equations to be solved. Called once, before
@@ -82,7 +83,31 @@ def setup(u_components, u, v, p, q, bcs, les_model, nn_model, nu, nut_,nunn_,
     if bcs['p'] == []:
         attach_pressure_nullspace(Ap, x_, Q)
 
-    d.update(u_ab=u_ab, a_conv=a_conv, a_scalar=a_scalar, LT=LT, KT=KT, NT=NT)
+    # Add Neumann boundary condition, grad(u)*n = 0
+    K2 = None
+    if neumann_facets != [] and boundary is not None:
+        if MPI.rank(MPI.comm_world) == 0:
+            print("Adding Neumann boundary condition for boundary with id(s)={}".format(neumann_facets))
+        ds = Measure("ds", domain=mesh, subdomain_data=boundary)
+        n = FacetNormal(mesh)
+        K2 = inner(v, (dot(grad(u), n))) * ds(neumann_facets[0])
+        for i in neumann_facets[:1]:
+            K2 += inner(v, (dot(grad(u), n))) * ds(i)
+
+    # Add Backflow stabilization at boundary
+    if backflow_facets != [] and boundary is not None:
+        if MPI.rank(MPI.comm_world) == 0:
+            print("Adding Backflow stabilization for boundary with id(s)={}".format(backflow_facets))
+        ds = Measure("ds", domain=mesh, subdomain_data=boundary)
+        n = FacetNormal(mesh)
+        if K2 is None:
+            K2 = inner(v, (dot(u_, n) - abs(dot(u_, n))) / 2.0 * u) * ds(backflow_facets[0])
+        else:
+            K2 += inner(v, (dot(u_, n) - abs(dot(u_, n))) / 2.0 * u) * ds(backflow_facets[0])
+        for i in backflow_facets[:1]:
+            K2 += inner(v, (dot(u_, n) - abs(dot(u_, n))) / 2.0 * u) * ds(i)
+
+    d.update(u_ab=u_ab, a_conv=a_conv, a_scalar=a_scalar, LT=LT, KT=KT, K2=K2)
     return d
 
 def get_solvers(use_krylov_solvers, krylov_solvers, bcs,
@@ -142,8 +167,8 @@ def get_solvers(use_krylov_solvers, krylov_solvers, bcs,
 
 
 def assemble_first_inner_iter(A, a_conv, dt, M, scalar_components, les_model, nn_model,
-                              a_scalar, K, nu, nut_, nunn_, u_components, LT, KT, NT,
-                              b_tmp, b0, x_1, x_2, u_ab, bcs, **NS_namespace):
+                              a_scalar, K, nu, nut_, nunn_, u_components, LT, KT, NT, K2,
+                              b_tmp, b0, x_1, x_2, u_ab, bcs, backflow_facets, backflow_beta, **NS_namespace):
     """Called on first inner iteration of velocity/pressure system.
 
     Assemble convection matrix, compute rhs of tentative velocity and
@@ -170,6 +195,10 @@ def assemble_first_inner_iter(A, a_conv, dt, M, scalar_components, les_model, nn
 
     # Add diffusion and compute rhs for all velocity components
     A.axpy(-0.5 * nu, K, True)
+    if backflow_facets != []:
+        K_tmp = assemble(K2)
+        A.axpy(backflow_beta, K_tmp, True)
+
     if les_model != "NoModel":
         assemble(nut_ * KT[1] * dx, tensor=KT[0])
         A.axpy(-0.5, KT[0], True)
