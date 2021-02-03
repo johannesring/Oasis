@@ -60,6 +60,13 @@ NS_parameters.update(
         rho=1085        # kg/m^3
         ),
 
+    # Neumann boundary condition on the outlets
+    neumann_facets=[],  # List of facets value(s) in boundaries to apply boundary condition
+
+    # Back flow stabilization, turned on if back_flow_facets is != [] and boundaries is not None
+    backflow_facets=[],  # List of facet value(s) in MeshFunction (boundaries) to apply back flow stabilization
+    backflow_beta=0.2,  # Standard value from Moghadam et al. Comput Mech (2011) 48:277–291
+
     # Parameter set when enabling test mode
     testing=False,
 
