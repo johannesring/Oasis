@@ -110,6 +110,13 @@ NS_parameters.update(
         preconditioner_type='jacobi'),
 )
 
+def pre_boundary_condition(**NS_namespace):
+    """Called after defining the function spaces and functions,
+       but before the boundary
+       conditions.
+    """
+    return dict(boundary=None)
+
 
 def velocity_tentative_hook(**NS_namespace):
     """Called just prior to solving for tentative velocity."""

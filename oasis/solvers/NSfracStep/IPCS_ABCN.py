@@ -12,7 +12,7 @@ def setup(u_components, u, v, p, q, bcs, les_model, nn_model, nu, nut_,nunn_,
           scalar_components, V, Q, x_, p_, u_, A_cache,
           velocity_update_solver, assemble_matrix, homogenize,
           GradFunction, DivFunction, LESsource, NNsource, backflow_facets,
-          neumann_facets, boundary,  **NS_namespace):
+          neumann_facets, boundary, mesh, **NS_namespace):
     """Preassemble mass and diffusion matrices.
 
     Set up and prepare all equations to be solved. Called once, before
@@ -107,7 +107,7 @@ def setup(u_components, u, v, p, q, bcs, les_model, nn_model, nu, nut_,nunn_,
         for i in backflow_facets[:1]:
             K2 += inner(v, (dot(u_, n) - abs(dot(u_, n))) / 2.0 * u) * ds(i)
 
-    d.update(u_ab=u_ab, a_conv=a_conv, a_scalar=a_scalar, LT=LT, KT=KT, K2=K2)
+    d.update(u_ab=u_ab, a_conv=a_conv, a_scalar=a_scalar, LT=LT, KT=KT, K2=K2, NT=NT)
     return d
 
 def get_solvers(use_krylov_solvers, krylov_solvers, bcs,

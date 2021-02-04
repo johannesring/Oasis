@@ -131,6 +131,9 @@ for ci in scalar_components:
 
 print_solve_info = use_krylov_solvers and krylov_solvers['monitor_convergence']
 
+# Anything problem specific
+vars().update(pre_boundary_condition(**vars()))
+
 # Boundary conditions
 bcs = create_bcs(**vars())
 
