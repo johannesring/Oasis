@@ -8,11 +8,13 @@ from ..NSfracStep import *
 from ..NSfracStep import __all__
 
 
-def setup(u_components, u, v, p, q, bcs, les_model, nn_model, nu, nut_,nunn_,
+def setup(u_components, u, v, p, q, bcs, les_model, nn_model, nu, nut_, nunn_,
           scalar_components, V, Q, x_, p_, u_, A_cache,
           velocity_update_solver, assemble_matrix, homogenize,
-          GradFunction, DivFunction, LESsource, NNsource, backflow_facets,
-          neumann_facets, boundary, mesh, **NS_namespace):
+          GradFunction, DivFunction, LESsource, NNsource,
+          backflow_facets, backflow_facets_grad,
+          dt, backflow_facets_conv,
+          boundary, mesh, **NS_namespace):
     """Preassemble mass and diffusion matrices.
 
     Set up and prepare all equations to be solved. Called once, before
@@ -83,21 +85,12 @@ def setup(u_components, u, v, p, q, bcs, les_model, nn_model, nu, nut_,nunn_,
     if bcs['p'] == []:
         attach_pressure_nullspace(Ap, x_, Q)
 
-    # Add Neumann boundary condition, grad(u)*n = 0
+    # Add Backflow stabilization at boundary (Outlet stabilization)
     K2 = None
-    if neumann_facets != [] and boundary is not None:
-        if MPI.rank(MPI.comm_world) == 0:
-            print("Adding Neumann boundary condition for boundary with id(s)={}".format(neumann_facets))
-        ds = Measure("ds", domain=mesh, subdomain_data=boundary)
-        n = FacetNormal(mesh)
-        K2 = inner(v, (dot(grad(u), n))) * ds(neumann_facets[0])
-        for i in neumann_facets[:1]:
-            K2 += inner(v, (dot(grad(u), n))) * ds(i)
-
-    # Add Backflow stabilization at boundary
     if backflow_facets != [] and boundary is not None:
         if MPI.rank(MPI.comm_world) == 0:
-            print("Adding Backflow stabilization for boundary with id(s)={}".format(backflow_facets))
+            print("Backflow treatment: Velocity penalization method on boundary with id(s)={}".format(
+                backflow_facets))
         ds = Measure("ds", domain=mesh, subdomain_data=boundary)
         n = FacetNormal(mesh)
         if K2 is None:
@@ -107,7 +100,47 @@ def setup(u_components, u, v, p, q, bcs, les_model, nn_model, nu, nut_,nunn_,
         for i in backflow_facets[:1]:
             K2 += inner(v, (dot(u_, n) - abs(dot(u_, n))) / 2.0 * u) * ds(i)
 
-    d.update(u_ab=u_ab, a_conv=a_conv, a_scalar=a_scalar, LT=LT, KT=KT, K2=K2, NT=NT)
+    # Add Backflow stabilization at boundary (Normal velocity constraint)
+    K3 = None
+    if backflow_facets_grad != [] and boundary is not None:
+        if MPI.rank(MPI.comm_world) == 0:
+            print("Backflow treatment: Velocity gradient penalization method on boundary with id(s)={}".format(
+                backflow_facets))
+        ds = Measure("ds", domain=mesh, subdomain_data=boundary)
+        n = FacetNormal(mesh)
+        n_ = as_vector([n[0], n[1], n[2]])
+        t_1 = as_vector([n[1], -n[0], 0])
+        t_j = cross(n_, t_1)
+        tangents = [t_1, t_j]
+        for j in range(mesh.topology().dim() - 1):
+            T = tangents[j]
+            un_ = (dot(u_, n) - abs(dot(u_, n))) / 2
+            if K3 is None:
+                K3 = inner(un_ * dot(T, grad(u)), dot(T, grad(v))) * ds(backflow_facets_grad[0])
+            else:
+                K3 += inner(un_ * dot(T, grad(u)), dot(T, grad(v))) * ds(backflow_facets_grad[0])
+
+    # Add Backflow stabilization at boundary (Convective boundary)
+    K4 = None
+    if backflow_facets_conv != [] and boundary is not None:
+        if MPI.rank(MPI.comm_world) == 0:
+            print("Backflow treatment: Convective boundary method on id(s)={}".format(
+                backflow_facets))
+        ds = Measure("ds", domain=mesh, subdomain_data=boundary)
+        n = FacetNormal(mesh)
+        K4 = 1 / dt * inner(u, v) * ds(backflow_facets_conv[0])
+        U_conv = 1.0
+        K4 += inner(-0.5 * U_conv * dot(grad(u), n), v) * ds(backflow_facets_conv[0])
+
+    # Add Backflow stabilization at boundary (Divergence function)
+    K5 = None
+    backflow_facets_div = []
+    if backflow_facets_div != [] and boundary is not None:
+        if MPI.rank(MPI.comm_world) == 0:
+            print("Backflow treatment: Divergence function on boundary with id(s)={}".format(
+                backflow_facets))
+
+    d.update(u_ab=u_ab, a_conv=a_conv, a_scalar=a_scalar, LT=LT, KT=KT, K2=K2, NT=NT, K3=K3, K4=K4)
     return d
 
 def get_solvers(use_krylov_solvers, krylov_solvers, bcs,
@@ -168,7 +201,9 @@ def get_solvers(use_krylov_solvers, krylov_solvers, bcs,
 
 def assemble_first_inner_iter(A, a_conv, dt, M, scalar_components, les_model, nn_model,
                               a_scalar, K, nu, nut_, nunn_, u_components, LT, KT, NT, K2,
-                              b_tmp, b0, x_1, x_2, u_ab, bcs, backflow_facets, backflow_beta, **NS_namespace):
+                              b_tmp, b0, x_1, x_2, u_ab, bcs, backflow_facets, backflow_beta,
+                              K3, backflow_facets_grad, backflow_gamma,
+                              backflow_facets_conv, K4, **NS_namespace):
     """Called on first inner iteration of velocity/pressure system.
 
     Assemble convection matrix, compute rhs of tentative velocity and
@@ -198,6 +233,14 @@ def assemble_first_inner_iter(A, a_conv, dt, M, scalar_components, les_model, nn
     if backflow_facets != []:
         K_tmp = assemble(K2)
         A.axpy(backflow_beta, K_tmp, True)
+
+    if backflow_facets_grad != []:
+        K_tmp = assemble(K3)
+        A.axpy(backflow_gamma, K_tmp, True)
+
+    if backflow_facets_conv != []:
+        K_tmp = assemble(K4)
+        A.axpy(1.0, K_tmp, True)
 
     if les_model != "NoModel":
         assemble(nut_ * KT[1] * dx, tensor=KT[0])
