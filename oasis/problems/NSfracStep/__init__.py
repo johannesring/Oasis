@@ -60,8 +60,12 @@ NS_parameters.update(
         rho=1085        # kg/m^3
         ),
 
-    # Neumann boundary condition on the outlets
-    neumann_facets=[],  # List of facets value(s) in boundaries to apply boundary condition
+    # Back flow stabilization (Velocity gradient)
+    backflow_facets_grad=[],
+    backflow_gamma=0.001 / 3,  # dx**2 / 3
+
+    # Back flow stabilization (Convective boundary)
+    backflow_facets_conv=[],
 
     # Back flow stabilization, turned on if back_flow_facets is != [] and boundaries is not None
     backflow_facets=[],  # List of facet value(s) in MeshFunction (boundaries) to apply back flow stabilization
@@ -109,6 +113,13 @@ NS_parameters.update(
         solver_type='cg',
         preconditioner_type='jacobi'),
 )
+
+def pre_boundary_condition(**NS_namespace):
+    """Called after defining the function spaces and functions,
+       but before the boundary
+       conditions.
+    """
+    return dict(boundary=None)
 
 
 def velocity_tentative_hook(**NS_namespace):
