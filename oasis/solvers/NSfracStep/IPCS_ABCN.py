@@ -2,7 +2,6 @@ __author__ = "Mikael Mortensen <mikaem@math.uio.no>"
 __date__ = "2013-11-06"
 __copyright__ = "Copyright (C) 2013 " + __author__
 __license__ = "GNU Lesser GPL version 3 or any later version"
-
 from dolfin import *
 from ..NSfracStep import *
 from ..NSfracStep import __all__
@@ -13,7 +12,8 @@ def setup(u_components, u, v, p, q, bcs, les_model, nn_model, nu, nut_, nunn_,
           velocity_update_solver, assemble_matrix, homogenize,
           GradFunction, DivFunction, LESsource, NNsource,
           backflow_facets, backflow_facets_grad,
-          dt, backflow_facets_conv,
+          dt, backflow_facets_conv, backflow_U_conv,
+          backflow_div_method,
           boundary, mesh, **NS_namespace):
     """Preassemble mass and diffusion matrices.
 
@@ -105,7 +105,7 @@ def setup(u_components, u, v, p, q, bcs, les_model, nn_model, nu, nut_, nunn_,
     if backflow_facets_grad != [] and boundary is not None:
         if MPI.rank(MPI.comm_world) == 0:
             print("Backflow treatment: Velocity gradient penalization method on boundary with id(s)={}".format(
-                backflow_facets))
+                backflow_facets_grad))
         ds = Measure("ds", domain=mesh, subdomain_data=boundary)
         n = FacetNormal(mesh)
         n_ = as_vector([n[0], n[1], n[2]])
@@ -125,20 +125,15 @@ def setup(u_components, u, v, p, q, bcs, les_model, nn_model, nu, nut_, nunn_,
     if backflow_facets_conv != [] and boundary is not None:
         if MPI.rank(MPI.comm_world) == 0:
             print("Backflow treatment: Convective boundary method on id(s)={}".format(
-                backflow_facets))
+                backflow_facets_conv))
         ds = Measure("ds", domain=mesh, subdomain_data=boundary)
         n = FacetNormal(mesh)
         K4 = 1 / dt * inner(u, v) * ds(backflow_facets_conv[0])
-        U_conv = 1.0
-        K4 += inner(-0.5 * U_conv * dot(grad(u), n), v) * ds(backflow_facets_conv[0])
+        K4 += inner(0.5 * backflow_U_conv * dot(grad(u), n), v) * ds(backflow_facets_conv[0])
 
-    # Add Backflow stabilization at boundary (Divergence function)
-    K5 = None
-    backflow_facets_div = []
-    if backflow_facets_div != [] and boundary is not None:
+    if backflow_div_method is not None:
         if MPI.rank(MPI.comm_world) == 0:
-            print("Backflow treatment: Divergence function on boundary with id(s)={}".format(
-                backflow_facets))
+            print("Backflow treatment: Divergence function on flow field")
 
     d.update(u_ab=u_ab, a_conv=a_conv, a_scalar=a_scalar, LT=LT, KT=KT, K2=K2, NT=NT, K3=K3, K4=K4)
     return d
@@ -232,7 +227,7 @@ def assemble_first_inner_iter(A, a_conv, dt, M, scalar_components, les_model, nn
     A.axpy(-0.5 * nu, K, True)
     if backflow_facets != []:
         K_tmp = assemble(K2)
-        A.axpy(backflow_beta, K_tmp, True)
+        A.axpy(-backflow_beta, K_tmp, True)
 
     if backflow_facets_grad != []:
         K_tmp = assemble(K3)
@@ -286,7 +281,7 @@ def velocity_tentative_assemble(ui, b, b_tmp, p_, gradp, **NS_namespace):
     gradp[ui].assemble_rhs(p_)
     b[ui].axpy(-1., gradp[ui].rhs)
 
-def velocity_tentative_solve(ui, A, bcs, x_, x_2, u_sol, b, udiff,
+def velocity_tentative_solve(ui, A, bcs, x_, x_2, u_sol, b, udiff, mesh_distance, D, backflow_div_method,
                              use_krylov_solvers, **NS_namespace):
     """Linear algebra solve of tentative velocity component."""
     #if use_krylov_solvers:
@@ -301,6 +296,31 @@ def velocity_tentative_solve(ui, A, bcs, x_, x_2, u_sol, b, udiff,
     t1 = Timer("Tentative Linear Algebra Solve")
     u_sol.solve(A, x_[ui], b[ui])
     t1.stop()
+
+    # Add Backflow stabilization at boundary (Divergence function)
+    if backflow_div_method is not None:
+        def Divergence(x, U_mean, L=D):
+            """
+            Thickness of last 'layer' of elements.
+            Selected here to reflect 1x diameter
+            """
+            C = U_mean
+            return [C*(1 - (x[i] / L)**2) if b else 0 for i, b in enumerate(x <= L)]
+
+        if backflow_div_method == "short":
+            # End of domain only
+            U_mean = 0.01  # TODO: Set U_mean to something problem specific
+            dx_ = Divergence(mesh_distance.get_local(), U_mean)
+        elif backflow_div_method == "full":
+            # All of domain
+            U_mean = 50  # TODO: Set U_mean to something problem specific
+            dx_ = (1 / (mesh_distance.get_local()+1E-5)) / 100000 * U_mean
+
+        mesh_distance.set_local(dx_)
+
+        # Add 'divergence' to flow field
+        x_[ui] += mesh_distance
+
     udiff[0] += norm(x_2[ui] - x_[ui])
 
 
