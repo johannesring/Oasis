@@ -60,14 +60,20 @@ NS_parameters.update(
         rho=1085        # kg/m^3
         ),
 
-    # Back flow stabilization (Velocity gradient)
+    # Backflow stabilization (Velocity gradient)
     backflow_facets_grad=[],
     backflow_gamma=0.001 / 3,  # dx**2 / 3
 
-    # Back flow stabilization (Convective boundary)
+    # Backflow stabilization (Convective boundary)
     backflow_facets_conv=[],
+    backflow_U_conv=122,  # Convective velocity # TODO: Make problem specific
 
-    # Back flow stabilization, turned on if back_flow_facets is != [] and boundaries is not None
+    # Backflow stabilization (Divergence function)
+    backflow_div_method=None,  # Divergence applied to domain: either 'full' or 'short'
+    mesh_distance=[],  # Array of distance between vertex points and specified boundary
+    D=6.35,  # Length to move away from boundary in Fischer method
+
+    # Backflow stabilization, turned on if back_flow_facets is != [] and boundaries is not None
     backflow_facets=[],  # List of facet value(s) in MeshFunction (boundaries) to apply back flow stabilization
     backflow_beta=0.2,  # Standard value from Moghadam et al. Comput Mech (2011) 48:277–291
 
