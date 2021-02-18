@@ -13,8 +13,7 @@ def setup(u_components, u, v, p, q, bcs, les_model, nn_model, nu, nut_, nunn_,
           GradFunction, DivFunction, LESsource, NNsource,
           backflow_facets, backflow_facets_grad,
           dt, backflow_facets_conv, backflow_U_conv,
-          backflow_div_method,
-          boundary, mesh, **NS_namespace):
+          backflow_div, boundary, mesh, **NS_namespace):
     """Preassemble mass and diffusion matrices.
 
     Set up and prepare all equations to be solved. Called once, before
@@ -131,7 +130,7 @@ def setup(u_components, u, v, p, q, bcs, les_model, nn_model, nu, nut_, nunn_,
         K4 = 1 / dt * inner(u, v) * ds(backflow_facets_conv[0])
         K4 += inner(0.5 * backflow_U_conv * dot(grad(u), n), v) * ds(backflow_facets_conv[0])
 
-    if backflow_div_method is not None:
+    if backflow_div:
         if MPI.rank(MPI.comm_world) == 0:
             print("Backflow treatment: Divergence function on flow field")
 
@@ -297,7 +296,7 @@ def velocity_tentative_solve(ui, A, bcs, x_, x_2, u_sol, b, udiff, mesh_distance
     u_sol.solve(A, x_[ui], b[ui])
     t1.stop()
 
-    if ui == "u0" and backflow_div is not None:  # TODO: Only add divergence in stream-wise direction
+    if ui == "u0" and backflow_div:  # TODO: Only add divergence in stream-wise direction
         backflow_divergence(mesh_distance, ui, x_, mesh)
 
     udiff[0] += norm(x_2[ui] - x_[ui])

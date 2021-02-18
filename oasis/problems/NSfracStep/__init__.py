@@ -69,9 +69,8 @@ NS_parameters.update(
     backflow_U_conv=122,  # Convective velocity # TODO: Make problem specific
 
     # Backflow stabilization (Divergence function)
-    backflow_div_method=None,  # Divergence applied to domain: either 'full' or 'short'
+    backflow_div=False,  # Divergence applied to domain: either 'full' or 'short'
     mesh_distance=[],  # Array of distance between vertex points and specified boundary
-    D=6.35,  # Length to move away from boundary in Fischer method
 
     # Backflow stabilization, turned on if back_flow_facets is != [] and boundaries is not None
     backflow_facets=[],  # List of facet value(s) in MeshFunction (boundaries) to apply back flow stabilization
