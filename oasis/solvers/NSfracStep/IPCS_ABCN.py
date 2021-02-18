@@ -281,7 +281,7 @@ def velocity_tentative_assemble(ui, b, b_tmp, p_, gradp, **NS_namespace):
     gradp[ui].assemble_rhs(p_)
     b[ui].axpy(-1., gradp[ui].rhs)
 
-def velocity_tentative_solve(ui, A, bcs, x_, x_2, u_sol, b, udiff, mesh_distance, D, backflow_div_method,
+def velocity_tentative_solve(ui, A, bcs, x_, x_2, u_sol, b, udiff, mesh_distance, backflow_div,
                              use_krylov_solvers, **NS_namespace):
     """Linear algebra solve of tentative velocity component."""
     #if use_krylov_solvers:
@@ -297,31 +297,29 @@ def velocity_tentative_solve(ui, A, bcs, x_, x_2, u_sol, b, udiff, mesh_distance
     u_sol.solve(A, x_[ui], b[ui])
     t1.stop()
 
-    # Add Backflow stabilization at boundary (Divergence function)
-    if backflow_div_method is not None:
-        def Divergence(x, U_mean, L=D):
-            """
-            Thickness of last 'layer' of elements.
-            Selected here to reflect 1x diameter
-            """
-            C = U_mean
-            return [C*(1 - (x[i] / L)**2) if b else 0 for i, b in enumerate(x <= L)]
-
-        if backflow_div_method == "short":
-            # End of domain only
-            U_mean = 0.01  # TODO: Set U_mean to something problem specific
-            dx_ = Divergence(mesh_distance.get_local(), U_mean)
-        elif backflow_div_method == "full":
-            # All of domain
-            U_mean = 50  # TODO: Set U_mean to something problem specific
-            dx_ = (1 / (mesh_distance.get_local()+1E-5)) / 100000 * U_mean
-
-        mesh_distance.set_local(dx_)
-
-        # Add 'divergence' to flow field
-        x_[ui] += mesh_distance
+    if ui == "u0" and backflow_div is not None:  # TODO: Only add divergence in stream-wise direction
+        backflow_divergence(mesh_distance, ui, x_, mesh)
 
     udiff[0] += norm(x_2[ui] - x_[ui])
+
+
+def backflow_divergence(mesh_distance, ui, x_, mesh):
+    def Divergence(x, U_mean):
+        """
+        Thickness of last 'layer' of elements.
+        """
+        L = 1.5 * (mesh.hmax() + mesh.hmin()) / 2  # TODO: Make as input param?
+        return [U_mean * (1 - (x[i] / L) ** 2) if b else 0 for i, b in enumerate(x <= L)]
+
+    # End of domain only
+    U_mean = 0.01  # TODO: Set U_mean to something problem specific
+    dx_ = Divergence(mesh_distance.get_local(), U_mean)
+
+    mesh_distance.set_local(dx_)
+
+    # Add 'divergence' to flow field
+    x_[ui] += mesh_distance
+
 
 
 def pressure_assemble(b, x_, dt, Ap, divu, **NS_namespace):
