@@ -18,8 +18,11 @@ def distance_from_bdry_piece(facet_f, tag):
 
     # Eikonal equation with stabilization
     print("Solving stabilized Eikonal equation")
-    eps = Constant(mesh.hmax() / 25)
-    F = sqrt(inner(grad(phi), grad(phi))) * v * dx - inner(f, v) * dx + eps * inner(grad(phi), grad(v)) * dx
+    eps = Constant(mesh.hmax() / 100)
+    F = sqrt(inner(grad(phi), grad(phi))) * v * dx \
+        - inner(f, v) * dx \
+        + eps * inner(grad(phi), grad(v)) * dx
+
     solve(F == 0, phi, bc)
 
     return phi

@@ -280,7 +280,7 @@ def velocity_tentative_assemble(ui, b, b_tmp, p_, gradp, **NS_namespace):
     gradp[ui].assemble_rhs(p_)
     b[ui].axpy(-1., gradp[ui].rhs)
 
-def velocity_tentative_solve(ui, A, bcs, x_, x_2, u_sol, b, udiff, mesh_distance, backflow_div,
+def velocity_tentative_solve(ui, A, bcs, x_, x_2, u_sol, b, udiff, mesh_distance, backflow_div, mesh,
                              use_krylov_solvers, **NS_namespace):
     """Linear algebra solve of tentative velocity component."""
     #if use_krylov_solvers:
@@ -303,7 +303,7 @@ def velocity_tentative_solve(ui, A, bcs, x_, x_2, u_sol, b, udiff, mesh_distance
 
 
 def backflow_divergence(mesh_distance, ui, x_, mesh):
-    def Divergence(x, U_mean):
+    def Divergence(x, U_mean, mesh):
         """
         Thickness of last 'layer' of elements.
         """
@@ -312,7 +312,7 @@ def backflow_divergence(mesh_distance, ui, x_, mesh):
 
     # End of domain only
     U_mean = 0.01  # TODO: Set U_mean to something problem specific
-    dx_ = Divergence(mesh_distance.get_local(), U_mean)
+    dx_ = Divergence(mesh_distance.get_local(), U_mean, mesh)
 
     mesh_distance.set_local(dx_)
 
