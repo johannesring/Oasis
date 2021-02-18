@@ -1,35 +1,25 @@
 from dolfin import *
 
 
-def find_distance(mesh, ignore_domain):
-    """
-    mesh: Mesh to calculate distance on
-    Ignore_domain: Part of boundary to be ignored, specified with e.g. AutoSubDomain()
-    """
-    if MPI.comm_world.Get_size() == 1:
-        bmesh = BoundaryMesh(mesh, 'exterior')
-        cell_f = MeshFunction('size_t', bmesh, 0)
-        ignore_domain.mark(cell_f, 1)
+def distance_from_bdry_piece(facet_f, tag):
+    """Solve Eikonal equation to get distance from tagged facets"""
+    mesh = facet_f.mesh()
+    V = FunctionSpace(mesh, 'CG', 1)
+    bc = DirichletBC(V, Constant(0.0), facet_f, tag)
 
-        bmesh_sub = SubMesh(bmesh, cell_f, 0)
-        File('submesh1.xml') << bmesh_sub
+    u, v = TrialFunction(V), TestFunction(V)
+    phi = Function(V)
+    f = Constant(1.0)
 
-    # FIXME: Does not work in parallel
-    if MPI.comm_world.Get_size() >= 1:
-        if MPI.comm_world.Get_size() > 1:
-            bmesh_sub = Mesh("submesh1.xml")
+    # Smooth initial guess
+    a = inner(grad(u), grad(v)) * dx
+    L = inner(f, v) * dx
+    solve(a == L, phi, bc, solver_parameters={"linear_solver": "gmres"})
 
-        tree = bmesh_sub.bounding_box_tree()
+    # Eikonal equation with stabilization
+    print("Solving stabilized Eikonal equation")
+    eps = Constant(mesh.hmax() / 25)
+    F = sqrt(inner(grad(phi), grad(phi))) * v * dx - inner(f, v) * dx + eps * inner(grad(phi), grad(v)) * dx
+    solve(F == 0, phi, bc)
 
-        V = FunctionSpace(mesh, 'CG', 1)
-        v_2_d = V.dofmap().entity_dofs(mesh, 0)
-
-        bdry_distance = Function(V)
-        values = bdry_distance.vector().get_local(v_2_d)
-        for index, vertex in enumerate(vertices(mesh)):
-            w, d = tree.compute_closest_entity(vertex.point())
-            values[v_2_d[index]] = d
-        bdry_distance.vector().set_local(values)
-        bdry_distance.vector().apply('insert')
-
-    return bdry_distance.vector()
+    return phi
